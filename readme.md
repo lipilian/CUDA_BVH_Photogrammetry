@@ -43,6 +43,8 @@ buildBVH(){
 }
 ```
 - Helper function for BVH tree construction
+    - Update the Node Bounds AABB
+    - Subdivide the Node to left and right child
 ```cpp
 updateNodeBounds(uint nodeIdx){
     BVHNode& node = bvhNodes[nodeIdx];
@@ -60,4 +62,65 @@ updateNodeBounds(uint nodeIdx){
     }
 }
 ```
+```cpp
+subdivideNode(uint nodeIdx){
+    BVHNode& node = bvhNodes[nodeIdx];
+    if(node.triCount <= 2){
+        return;
+    }
+    float3 extent = node.max - node.min;
+    int axis = 0;
+    if (extent.y > extent.x) axis = 1;
+    if (extent.z > (axis == 0 ? extent.x : extent.y)) axis = 2;
+    float splitPos;
+    if(axis == 0){
+        splitPos = node.min.x + extent.x * 0.5f;
+    } else if (axis == 1)
+    {
+        splitPos = node.min.y + extent.y * 0.5f;
+    } else {
+        splitPos = node.min.z + extent.z * 0.5f;
+    }
+    int i = node.leftFirst, j = node.leftFirst + node.triCount - 1;
+    while(i <= j){
+        const float3& centroids = triangles[triIdx[i]].centroids;
+        if(axis == 0){
+            if (centroids.x < splitPos) {
+                i++;
+            } else {
+                std::swap(triIdx[i], triIdx[j--]);
+            }
+        } else if (axis == 1){
+            if (centroids.y < splitPos) {
+                i++;
+            } else {
+                std::swap(triIdx[i], triIdx[j--]);
+            }
+        } else {
+            if (centroids.z < splitPos) {
+                i++;
+            } else {
+                std::swap(triIdx[i], triIdx[j--]);
+            }
+        } 
+    }
+    int leftCount = i - node.leftFirst;
+    if (leftCount == 0 || leftCount == node.triCount) {
+        return;
+    }
+    int leftChildIdx = nodesUsed++;
+    int rightChildIdx = nodesUsed++;
+    bvhNodes[leftChildIdx].leftFirst = node.leftFirst;
+    bvhNodes[leftChildIdx].triCount = leftCount;
+    bvhNodes[rightChildIdx].leftFirst = i;
+    bvhNodes[rightChildIdx].triCount = node.triCount - leftCount;
+    node.leftFirst = leftChildIdx;
+	node.triCount = 0;
+	updateNodeBounds( leftChildIdx );
+	updateNodeBounds( rightChildIdx );
+    subdivideNode( leftChildIdx );
+	subdivideNode( rightChildIdx );
+}
+```
+
 
