@@ -1,0 +1,39 @@
+{
+	"files": [
+		{
+			"path": "src/LiuHongCudaRayTracing.cu",
+			"bookmarks": [
+				{
+					"line": 117,
+					"column": 4,
+					"label": "gpu bvh backtracking"
+				},
+				{
+					"line": 118,
+					"column": 69,
+					"label": "increase stack size if we have fine mesh"
+				},
+				{
+					"line": 246,
+					"column": 49,
+					"label": "deconstructor"
+				},
+				{
+					"line": 295,
+					"column": 52,
+					"label": "transform the x,y,z to x,-z,y here"
+				},
+				{
+					"line": 609,
+					"column": 4,
+					"label": "start allocate gpu memory"
+				},
+				{
+					"line": 844,
+					"column": 0,
+					"label": "traversal through bvh tree"
+				}
+			]
+		}
+	]
+}
