@@ -209,6 +209,71 @@ __global__ void maskRayTrace(const unsigned char * masks, const bool * blocked, 
     }
 }
 ```
+- Finally use Möller–Trumbore intersection algorithm Ray casting 2D image mask to 3D mesh model.
+Any point on the mesh triangle can be represented by the following equation as three vertices of the triangle:
+
+$$P=w v_1+u v_2+v v_3$$
+
+The coefficients must be non-negative and sum to 1. 
+
+Every point on the ray can be expressed by
+
+$$\vec{r}(t)=O+t \vec{v}$$
+
+If this ray hit the triangle, then we have this equation:
+
+$$
+\begin{aligned}
+O + t D &= v_1 + u \left(v_2 - v_1\right) + v \left(v_3 - v_1\right) \\
+O - v_1 &= -t D + u \left(v_2 - v_1\right) + v \left(v_3 - v_1\right)
+\end{aligned}
+$$
+
+we can solve this equation by Cramer's rule:
+
+$$
+\left[\begin{array}{ccc}
+\mid & \mid & \mid \\
+-D & (v 2-v 1) & (v 3-v 1) \\
+\mid & \mid & \mid
+\end{array}\right]\left[\begin{array}{l}
+t \\
+u \\
+v
+\end{array}\right]=O-v_1
+$$
+
+First we get $O$ from cameras.sfm file. 
+If you want to get the camera position in blender, you need to rotate 90 degree around x-axis, and change y up to z up.
+
+- Center convert
+
+$$
+R_x\left(90^{\circ}\right)=\left[\begin{array}{ccc}
+1 & 0 & 0 \\
+0 & 0 & -1 \\
+0 & 1 & 0
+\end{array}\right]
+$$
+
+$$
+\left[\begin{array}{l}
+x^{\prime} \\
+y^{\prime} \\
+z^{\prime}
+\end{array}\right]=\left[\begin{array}{ccc}
+1 & 0 & 0 \\
+0 & 0 & -1 \\
+0 & 1 & 0
+\end{array}\right] \cdot\left[\begin{array}{l}
+x \\
+y \\
+z
+\end{array}\right]
+$$
+- Reduce sum with GPU to compute mask area information.
+
+
 
 
 
