@@ -117,8 +117,11 @@ subdivideNode(uint nodeIdx){
     node.leftFirst = leftChildIdx;
 	node.triCount = 0;
 	updateNodeBounds( leftChildIdx );
+
 	updateNodeBounds( rightChildIdx );
+    
     subdivideNode( leftChildIdx );
+
 	subdivideNode( rightChildIdx );
 }
 ```
