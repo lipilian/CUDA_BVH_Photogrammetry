@@ -119,11 +119,75 @@ subdivideNode(uint nodeIdx){
 	updateNodeBounds( leftChildIdx );
 
 	updateNodeBounds( rightChildIdx );
-    
+
     subdivideNode( leftChildIdx );
 
 	subdivideNode( rightChildIdx );
 }
 ```
+## 3.2 Transfer The BVH tree to GPU
+## 3.3 Trace Ray in GPU
+```cpp
+bvh3DBackTrack<<<numBlocks, blockSize>>>(d_bvhNodes, d_triangles, d_triIdx, d_blocked, numF, numFrames);
+
+maskRayTrace<<<numBlocks, blockSize>>>(d_masks, d_blocked, d_hitCount, d_triangles, numF, numFrames, focalLength);
+```
+
+```cuda
+__global__ void bvh3DBackTrack(const BVHNode * bvhNodes, const Tri * triangles, const uint * triIdx, const unsigned char * mask, float * depth, float minDepth, float maxDepth, float focalLength, int i){
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if(idx < IMG_SIZE * IMG_SIZE){
+        float3 O = make_float3(d_startPoint[3 * i], d_startPoint[3 * i + 1], d_startPoint[3 * i + 2]);
+        float3 direction = make_float3(d_direction[3 * i], d_direction[3 * i + 1], d_direction[3 * i + 2]);
+        float3 right = make_float3(d_right[3 * i], d_right[3 * i + 1], d_right[3 * i + 2]);
+        float3 up = make_float3(d_up[3 * i], d_up[3 * i + 1], d_up[3 * i + 2]);
+        if(true){
+            if(depth[idx] > maxDepth || depth[idx] < minDepth){
+                depth[idx] = 0.0f;
+            } else {
+                int xIndex = idx % IMG_SIZE;
+                int yIndex = idx / IMG_SIZE;
+                float x = (xIndex - IMG_SIZE / 2.f) * SENSOR_WIDTH / IMG_SIZE;
+                float y = (IMG_SIZE / 2.f - yIndex) * SENSOR_WIDTH / IMG_SIZE;
+                float3 D = make_float3(focalLength * direction.x + x * right.x + y * up.x, focalLength * direction.y + x * right.y + y * up.y, focalLength * direction.z + x * right.z + y * up.z);
+                float D_length = sqrtf(D.x * D.x + D.y * D.y + D.z * D.z);
+                // start bvh traversal
+                uint stack[64];
+                float distance = FLT_MAX;
+                uint * stackPtr = stack;
+                *stackPtr++ = 0;
+                while(stackPtr > stack){
+                    uint currentNodeIdx = *--stackPtr;
+                    const BVHNode node = bvhNodes[currentNodeIdx];
+                    if(!intersectAABB(O, D, node.min, node.max)){
+                        continue;
+                    }
+                    if(node.triCount > 0){
+                        for(int j = 0; j < node.triCount; j++){
+                            uint temp = triIdx[node.leftFirst + j];
+                            float t = intersectTri(O, D, triangles[temp]);
+                            if(t > 0){
+                                distance = fminf(distance, t * D_length);
+                            }
+                        }
+                    } else {
+                        *stackPtr++ = node.leftFirst;
+                        *stackPtr++ = node.leftFirst + 1;
+                    }
+                }
+                if(distance < FLT_MAX){
+                    depth[idx] = depth[idx] / distance;
+                } else {
+                    depth[idx] = 0.0f;
+                }
+            }
+        } else {
+            depth[idx] = 0.0f;
+        }
+    }
+}
+```
+
+
 
 
