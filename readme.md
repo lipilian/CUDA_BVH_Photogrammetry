@@ -44,6 +44,20 @@ buildBVH(){
 ```
 - Helper function for BVH tree construction
 ```cpp
-
+updateNodeBounds(uint nodeIdx){
+    BVHNode& node = bvhNodes[nodeIdx];
+    node.min = make_float3(FLT_MAX, FLT_MAX, FLT_MAX);
+    node.max = make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+    for (uint first = node.leftFirst, i = 0; i < node.triCount; ++i) {
+        uint leafTriIdx = triIdx[first + i];
+        Tri& leafTri = triangles[leafTriIdx];
+        node.min = make_float3(fminf(node.min.x, fminf(leafTri.v0.x, fminf(leafTri.v1.x, leafTri.v2.x))),
+                               fminf(node.min.y, fminf(leafTri.v0.y, fminf(leafTri.v1.y, leafTri.v2.y))),
+                               fminf(node.min.z, fminf(leafTri.v0.z, fminf(leafTri.v1.z, leafTri.v2.z))));
+        node.max = make_float3(fmaxf(node.max.x, fmaxf(leafTri.v0.x, fmaxf(leafTri.v1.x, leafTri.v2.x))),
+                                 fmaxf(node.max.y, fmaxf(leafTri.v0.y, fmaxf(leafTri.v1.y, leafTri.v2.y))),
+                                 fmaxf(node.max.z, fmaxf(leafTri.v0.z, fmaxf(leafTri.v1.z, leafTri.v2.z))));
+    }
+}
 ```
 
