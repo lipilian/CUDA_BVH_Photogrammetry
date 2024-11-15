@@ -132,57 +132,79 @@ bvh3DBackTrack<<<numBlocks, blockSize>>>(d_bvhNodes, d_triangles, d_triIdx, d_bl
 
 maskRayTrace<<<numBlocks, blockSize>>>(d_masks, d_blocked, d_hitCount, d_triangles, numF, numFrames, focalLength);
 ```
-
+- Use pointer through stack to perform bfs traversal
 ```cuda
-__global__ void bvh3DBackTrack(const BVHNode * bvhNodes, const Tri * triangles, const uint * triIdx, const unsigned char * mask, float * depth, float minDepth, float maxDepth, float focalLength, int i){
+__global__ void bvh3DBackTrack(const BVHNode * bvhNodes, const Tri * triangles, const uint * triIdx, bool * blocked, int numF, int numFrames){
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    if(idx < IMG_SIZE * IMG_SIZE){
-        float3 O = make_float3(d_startPoint[3 * i], d_startPoint[3 * i + 1], d_startPoint[3 * i + 2]);
-        float3 direction = make_float3(d_direction[3 * i], d_direction[3 * i + 1], d_direction[3 * i + 2]);
-        float3 right = make_float3(d_right[3 * i], d_right[3 * i + 1], d_right[3 * i + 2]);
-        float3 up = make_float3(d_up[3 * i], d_up[3 * i + 1], d_up[3 * i + 2]);
-        if(true){
-            if(depth[idx] > maxDepth || depth[idx] < minDepth){
-                depth[idx] = 0.0f;
-            } else {
-                int xIndex = idx % IMG_SIZE;
-                int yIndex = idx / IMG_SIZE;
-                float x = (xIndex - IMG_SIZE / 2.f) * SENSOR_WIDTH / IMG_SIZE;
-                float y = (IMG_SIZE / 2.f - yIndex) * SENSOR_WIDTH / IMG_SIZE;
-                float3 D = make_float3(focalLength * direction.x + x * right.x + y * up.x, focalLength * direction.y + x * right.y + y * up.y, focalLength * direction.z + x * right.z + y * up.z);
-                float D_length = sqrtf(D.x * D.x + D.y * D.y + D.z * D.z);
-                // start bvh traversal
-                uint stack[64];
-                float distance = FLT_MAX;
-                uint * stackPtr = stack;
-                *stackPtr++ = 0;
-                while(stackPtr > stack){
-                    uint currentNodeIdx = *--stackPtr;
-                    const BVHNode node = bvhNodes[currentNodeIdx];
-                    if(!intersectAABB(O, D, node.min, node.max)){
-                        continue;
-                    }
-                    if(node.triCount > 0){
-                        for(int j = 0; j < node.triCount; j++){
-                            uint temp = triIdx[node.leftFirst + j];
-                            float t = intersectTri(O, D, triangles[temp]);
-                            if(t > 0){
-                                distance = fminf(distance, t * D_length);
-                            }
-                        }
-                    } else {
-                        *stackPtr++ = node.leftFirst;
-                        *stackPtr++ = node.leftFirst + 1;
-                    }
+    if(idx < numF){
+        float3 P1 = triangles[idx].centroids;
+        uint stack[32]; //! 64 is LiuHong's estimation, if in the future we out of memory or we have larger mesh, change this number
+        uint * stackPtr;
+        for(int i = 0; i < numFrames; i++){
+            bool isBlocked = false; // default we assume the ray is not blocked
+            // * Traversal the BVH tree *
+            stackPtr = stack;
+            float3 P2 = make_float3(d_startPoint[3 * i], d_startPoint[3 * i + 1], d_startPoint[3 * i + 2]);
+            float3 D = P2 - P1;
+            float3 O = P1 - make_float3(1e-5f * D.x, 1e-5f * D.y, 1e-5f * D.z); // ! temporary fix by use very small number.
+            *stackPtr++ = 0;
+            while(stackPtr > stack && !isBlocked){
+                uint currentNodeIdx = *--stackPtr;
+                const BVHNode node = bvhNodes[currentNodeIdx];
+                if(!intersectAABB(O, D, node.min, node.max)){
+                    continue;
                 }
-                if(distance < FLT_MAX){
-                    depth[idx] = depth[idx] / distance;
+                if(node.triCount > 0){ // means this is leaf node.
+                    for(int j = 0; j < node.triCount && !isBlocked; j++){
+                        uint temp = triIdx[node.leftFirst + j];
+                        if(temp != idx && intersectTri(O, D, triangles[temp]) > 0){
+                            // blocked
+                            isBlocked = true;
+                        }
+                    }
                 } else {
-                    depth[idx] = 0.0f;
+                    *stackPtr++ = node.leftFirst;
+                    *stackPtr++ = node.leftFirst + 1;
                 }
             }
-        } else {
-            depth[idx] = 0.0f;
+            blocked[i * numF + idx] = isBlocked;
+        }
+    }
+}
+```
+- Mask Ray tracing with blockage checking.
+```cuda
+__global__ void maskRayTrace(const unsigned char * masks, const bool * blocked, uint * hitCount, const Tri * triangles, int numF, int numFrames, float focalLength){
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if(idx < numF){
+        hitCount[idx] = 0; //! very important to reset the hit count to 0 for each triangle
+        float3 P1 = triangles[idx].centroids;
+        for(int i = 0; i < numFrames; i++){
+            float3 P2 = make_float3(d_startPoint[3 * i], d_startPoint[3 * i + 1], d_startPoint[3 * i + 2]);
+            float3 D = P2 - P1;
+            // * Check if this triangle is visible by camera *
+            if(!blocked[i * numF + idx]){
+                float3 n = make_float3(d_direction[3 * i], d_direction[3 * i + 1], d_direction[3 * i + 2]);
+                float3 P0 = P2 + make_float3(n.x * focalLength, n.y * focalLength, n.z * focalLength);
+                float denorm = dot(n, D);
+                if(fabs(denorm) > 1e-6){
+                    float3 P0_P1 = P0 - P1;
+                    float t = dot(n, P0_P1) / denorm;
+                    float3 intersectionPoint = P1 + make_float3(t * D.x, t * D.y, t * D.z);
+                    float3 P02Intersection = intersectionPoint - P0;
+                    float3 x_unit = make_float3(d_right[3 * i], d_right[3 * i + 1], d_right[3 * i + 2]);
+                    float3 y_unit = make_float3(d_up[3 * i], d_up[3 * i + 1], d_up[3 * i + 2]);
+                    float x = dot(P02Intersection, x_unit);
+                    float y = dot(P02Intersection, y_unit);
+                    int xIndex = (int)(x * float(IMG_SIZE) / SENSOR_WIDTH + IMG_SIZE / 2.f);
+                    int yIndex = (int)(IMG_SIZE / 2.f - y * float(IMG_SIZE) / SENSOR_WIDTH);
+                    if(xIndex >= 0 && xIndex < int(IMG_SIZE) && yIndex >= 0 && yIndex < int(IMG_SIZE)){
+                        if(masks[i * IMG_SIZE * IMG_SIZE + yIndex * IMG_SIZE + xIndex] > 0){
+                            hitCount[idx]++;
+                        }
+                    }
+                }
+            }
         }
     }
 }
